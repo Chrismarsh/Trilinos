@@ -447,14 +447,20 @@ OpenMP OpenMP::create_instance(...) { return OpenMP(); }
 
 int OpenMP::concurrency() { return Impl::g_openmp_hardware_max_threads; }
 
-void OpenMP::fence() const {}
+void OpenMP::fence() const {
+  fence("Kokkos::OpenMP::fence: Unnamed Instance Fence");
+}
+void OpenMP::fence(const std::string &name) const {
+  Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::OpenMP>(
+      name, Kokkos::Tools::Experimental::Impl::DirectFenceIDHandle{1}, []() {});
+}
 
 namespace Impl {
 
 int g_openmp_space_factory_initialized =
     initialize_space_factory<OpenMPSpaceInitializer>("050_OpenMP");
 
-void OpenMPSpaceInitializer::initialize(const InitArguments &args) {
+void OpenMPSpaceInitializer::do_initialize(const InitArguments &args) {
   // Prevent "unused variable" warning for 'args' input struct.  If
   // Serial::initialize() ever needs to take arguments from the input
   // struct, you may remove this line of code.
@@ -469,11 +475,18 @@ void OpenMPSpaceInitializer::initialize(const InitArguments &args) {
   }
 }
 
-void OpenMPSpaceInitializer::finalize(const bool) {
+void OpenMPSpaceInitializer::do_finalize(const bool) {
   if (Kokkos::OpenMP::impl_is_initialized()) Kokkos::OpenMP::impl_finalize();
 }
 
 void OpenMPSpaceInitializer::fence() { Kokkos::OpenMP::impl_static_fence(); }
+void OpenMPSpaceInitializer::fence(const std::string &name) {
+  Kokkos::OpenMP::impl_static_fence(OpenMP(), name);
+}
+
+void OpenMPSpaceInitializer::print_exec_space_name(std::ostream &strm) {
+  strm << "OpenMP";
+}
 
 void OpenMPSpaceInitializer::print_configuration(std::ostream &msg,
                                                  const bool detail) {

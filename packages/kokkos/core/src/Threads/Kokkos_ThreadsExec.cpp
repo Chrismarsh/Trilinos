@@ -288,21 +288,46 @@ int ThreadsExec::in_parallel() {
   return s_current_function && (&s_threads_process != s_current_function_arg) &&
          (s_threads_process.m_pool_base || !is_process());
 }
+void ThreadsExec::fence() { internal_fence(Impl::fence_is_static::yes); }
+void ThreadsExec::fence(const std::string &name) {
+  internal_fence(name, Impl::fence_is_static::yes);
+}
+
+void ThreadsExec::internal_fence(Impl::fence_is_static is_static) {
+  internal_fence((is_static == Impl::fence_is_static::no)
+                     ? "Kokkos::ThreadsExec::fence: Unnamed Instance Fence"
+                     : "Kokkos::ThreadsExec::fence: Unnamed Global Fence",
+                 is_static);
+}
 
 // Wait for root thread to become inactive
-void ThreadsExec::fence() {
-  if (s_thread_pool_size[0]) {
-    // Wait for the root thread to complete:
-    Impl::spinwait_while_equal<int>(s_threads_exec[0]->m_pool_state,
-                                    ThreadsExec::Active);
+void ThreadsExec::internal_fence(const std::string &name,
+                                 Impl::fence_is_static is_static) {
+  const auto &fence_lam = [&]() {
+    if (s_thread_pool_size[0]) {
+      // Wait for the root thread to complete:
+      Impl::spinwait_while_equal<int>(s_threads_exec[0]->m_pool_state,
+                                      ThreadsExec::Active);
+    }
+
+    s_current_function     = nullptr;
+    s_current_function_arg = nullptr;
+
+    // Make sure function and arguments are cleared before
+    // potentially re-activating threads with a subsequent launch.
+    memory_fence();
+  };
+  if (is_static == Impl::fence_is_static::yes) {
+    Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Threads>(
+        name,
+        Kokkos::Tools::Experimental::SpecialSynchronizationCases::
+            GlobalDeviceSynchronization,
+        fence_lam);
+  } else {
+    Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Threads>(
+        name, Kokkos::Tools::Experimental::Impl::DirectFenceIDHandle{1},
+        fence_lam);
   }
-
-  s_current_function     = nullptr;
-  s_current_function_arg = nullptr;
-
-  // Make sure function and arguments are cleared before
-  // potentially re-activating threads with a subsequent launch.
-  memory_fence();
 }
 
 /** \brief  Begin execution of the asynchronous functor */
@@ -769,7 +794,12 @@ void ThreadsExec::finalize() {
 namespace Kokkos {
 
 int Threads::concurrency() { return impl_thread_pool_size(0); }
-void Threads::fence() const { Impl::ThreadsExec::fence(); }
+void Threads::fence() const {
+  Impl::ThreadsExec::internal_fence(Impl::fence_is_static::no);
+}
+void Threads::fence(const std::string &name) const {
+  Impl::ThreadsExec::internal_fence(name, Impl::fence_is_static::no);
+}
 
 Threads &Threads::impl_instance(int) {
   static Threads t;
@@ -798,7 +828,7 @@ namespace Impl {
 int g_threads_space_factory_initialized =
     initialize_space_factory<ThreadsSpaceInitializer>("050_Threads");
 
-void ThreadsSpaceInitializer::initialize(const InitArguments &args) {
+void ThreadsSpaceInitializer::do_initialize(const InitArguments &args) {
   const int num_threads = args.num_threads;
   const int use_numa    = args.num_numa;
   if (std::is_same<Kokkos::Threads, Kokkos::DefaultExecutionSpace>::value ||
@@ -821,7 +851,7 @@ void ThreadsSpaceInitializer::initialize(const InitArguments &args) {
   }
 }
 
-void ThreadsSpaceInitializer::finalize(const bool all_spaces) {
+void ThreadsSpaceInitializer::do_finalize(const bool all_spaces) {
   if (std::is_same<Kokkos::Threads, Kokkos::DefaultExecutionSpace>::value ||
       std::is_same<Kokkos::Threads,
                    Kokkos::HostSpace::execution_space>::value ||
@@ -832,6 +862,13 @@ void ThreadsSpaceInitializer::finalize(const bool all_spaces) {
 }
 
 void ThreadsSpaceInitializer::fence() { Kokkos::Threads::impl_static_fence(); }
+void ThreadsSpaceInitializer::fence(const std::string &name) {
+  Kokkos::Threads::impl_static_fence(name);
+}
+
+void ThreadsSpaceInitializer::print_exec_space_name(std::ostream &msg) {
+  msg << "Threads";
+}
 
 void ThreadsSpaceInitializer::print_configuration(std::ostream &msg,
                                                   const bool detail) {

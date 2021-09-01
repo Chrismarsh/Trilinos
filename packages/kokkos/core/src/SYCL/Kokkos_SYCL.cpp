@@ -112,14 +112,36 @@ void SYCL::print_configuration(std::ostream& s, const bool detailed) {
 }
 
 void SYCL::fence() const {
-  Impl::SYCLInternal::fence(*m_space_instance->m_queue);
+  fence("Kokkos::Experimental::SYCL::fence: Unnamed Instance Fence");
+}
+void SYCL::fence(const std::string& name) const {
+  Impl::SYCLInternal::fence(*m_space_instance->m_queue, name,
+                            impl_instance_id());
 }
 
 void SYCL::impl_static_fence() {
-  // guard accessing all_queues
-  std::lock_guard<std::mutex> lock(Impl::SYCLInternal::mutex);
-  for (auto& queue : Impl::SYCLInternal::all_queues)
-    Impl::SYCLInternal::fence(**queue);
+  impl_static_fence(
+      "Kokkos::Experimental::SYCL::fence: Unnamed Instance Fence");
+}
+void SYCL::impl_static_fence(const std::string& name) {
+  Kokkos::Tools::Experimental::Impl::profile_fence_event<
+      Kokkos::Experimental::SYCL>(
+      name,
+      Kokkos::Tools::Experimental::SpecialSynchronizationCases::
+          GlobalDeviceSynchronization,
+      [&]() {
+        // guard accessing all_queues
+        std::lock_guard<std::mutex> lock(Impl::SYCLInternal::mutex);
+        for (auto& queue : Impl::SYCLInternal::all_queues) {
+          try {
+            (*queue)->wait_and_throw();
+          } catch (sycl::exception const& e) {
+            Kokkos::Impl::throw_runtime_exception(
+                std::string("There was a synchronous SYCL error:\n") +=
+                e.what());
+          }
+        }
+      });
 }
 
 int SYCL::sycl_device() const {
@@ -224,10 +246,6 @@ std::ostream& SYCL::impl_sycl_info(std::ostream& os,
             << device.get_info<device::global_mem_cache_size>()
             << "\nGlobal Mem Size: "
             << device.get_info<device::global_mem_size>()
-            << "\nMax Constant Buffer Size: "
-            << device.get_info<device::max_constant_buffer_size>()
-            << "\nMax Constant Args: "
-            << device.get_info<device::max_constant_args>()
             << "\nLocal Mem Size: " << device.get_info<device::local_mem_size>()
             << "\nError Correction Support: "
             << device.get_info<device::error_correction_support>()
@@ -268,7 +286,7 @@ namespace Impl {
 int g_sycl_space_factory_initialized =
     Kokkos::Impl::initialize_space_factory<SYCLSpaceInitializer>("170_SYCL");
 
-void SYCLSpaceInitializer::initialize(const InitArguments& args) {
+void SYCLSpaceInitializer::do_initialize(const InitArguments& args) {
   int use_gpu = Kokkos::Impl::get_gpu(args);
 
   if (std::is_same<Kokkos::Experimental::SYCL,
@@ -284,7 +302,7 @@ void SYCLSpaceInitializer::initialize(const InitArguments& args) {
   }
 }
 
-void SYCLSpaceInitializer::finalize(const bool all_spaces) {
+void SYCLSpaceInitializer::do_finalize(const bool all_spaces) {
   if (std::is_same<Kokkos::Experimental::SYCL,
                    Kokkos::DefaultExecutionSpace>::value ||
       all_spaces) {
@@ -295,6 +313,13 @@ void SYCLSpaceInitializer::finalize(const bool all_spaces) {
 
 void SYCLSpaceInitializer::fence() {
   Kokkos::Experimental::SYCL::impl_static_fence();
+}
+void SYCLSpaceInitializer::fence(const std::string& name) {
+  Kokkos::Experimental::SYCL::impl_static_fence(name);
+}
+
+void SYCLSpaceInitializer::print_exec_space_name(std::ostream& msg) {
+  msg << "SYCL";
 }
 
 void SYCLSpaceInitializer::print_configuration(std::ostream& msg,
