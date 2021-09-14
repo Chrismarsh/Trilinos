@@ -96,10 +96,10 @@ TEST(TEST_CATEGORY, view_copy_tests) {
   auto host = Kokkos::DefaultHostExecutionSpace();
 
   constexpr bool DevExecCanAccessHost =
-      Kokkos::Impl::SpaceAccessibility<typename TEST_EXECSPACE::execution_space,
-                                       Kokkos::HostSpace>::accessible;
+      Kokkos::SpaceAccessibility<typename TEST_EXECSPACE::execution_space,
+                                 Kokkos::HostSpace>::accessible;
 
-  constexpr bool HostExecCanAccessDev = Kokkos::Impl::SpaceAccessibility<
+  constexpr bool HostExecCanAccessDev = Kokkos::SpaceAccessibility<
       typename Kokkos::HostSpace::execution_space,
       typename TEST_EXECSPACE::memory_space>::accessible;
 
@@ -223,6 +223,7 @@ TEST(TEST_CATEGORY, view_copy_tests) {
     Kokkos::deep_copy(dev, b, h_b);
     ASSERT_TRUE(run_check(b, 4));
   }
+
   // Non contiguous copies
   {
     Kokkos::deep_copy(dev, s_a, 5);
